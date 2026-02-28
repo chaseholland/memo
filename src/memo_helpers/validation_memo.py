@@ -2,7 +2,7 @@ import click
 
 
 def selection_notes_validation(
-    folder, edit, delete, move, add, flist, search, remove, export, view
+    folder, edit, delete, move, add, flist, search, remove, export, view, pdf_export=None
 ):
     used_flags = {
         "folder": bool(folder),
@@ -15,6 +15,7 @@ def selection_notes_validation(
         "remove": remove,
         "export": export,
         "view": view is not None,
+        "pdf_export": pdf_export is not None,
     }
 
     if add and not folder:
@@ -27,9 +28,9 @@ def selection_notes_validation(
             "--flist must be used alone. It cannot be combined with other flags or --folder."
         )
 
-    modifier_flags = ["edit", "delete", "move", "remove", "search", "export", "view"]
+    modifier_flags = ["edit", "delete", "move", "remove", "search", "export", "view", "pdf_export"]
     used_modifiers = [f for f in modifier_flags if used_flags[f]]
     if len(used_modifiers) > 1:
         raise click.UsageError(
-            "Only one of --edit, --delete, --move, --remove, --export, --view, or --search can be used at a time."
+            "Only one of --edit, --delete, --move, --remove, --export, --view, --pdf-export, or --search can be used at a time."
         )

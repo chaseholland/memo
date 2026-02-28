@@ -16,6 +16,7 @@ from memo_helpers.list_folder import notes_folders
 from memo_helpers.validation_memo import selection_notes_validation
 from memo_helpers.search_memo import fuzzy_notes
 from memo_helpers.export_memo import export_memo
+from memo_helpers.pdf_export_memo import pdf_export_memo
 from memo_helpers.id_search_memo import id_search_memo
 from memo_helpers.md_converter import md_converter
 
@@ -81,16 +82,38 @@ def cli():
     help="Export your notes to the Desktop.",
 )
 @click.option(
+    "--pdf-export",
+    "-pe",
+    type=click.IntRange(min=1),
+    default=None,
+    help="Export notes modified in the last N days as PDF.",
+)
+@click.option(
     "--view",
     "-v",
     type=int,
     default=None,
     help="Display the content of note N from the list.",
 )
-def notes(folder, edit, add, delete, move, flist, search, remove, export, view):
+def notes(folder, edit, add, delete, move, flist, search, remove, export, pdf_export, view):
     selection_notes_validation(
-        folder, edit, delete, move, add, flist, search, remove, export, view
+        folder, edit, delete, move, add, flist, search, remove, export, view, pdf_export
     )
+    if pdf_export:
+        if click.confirm(f"\nExport notes modified in the last {pdf_export} days as PDF?"):
+            default_path = os.path.expanduser("~/Desktop/notes_pdf/")
+            path_choice = click.confirm(
+                "\nDo you want to export to the default path (Desktop/notes_pdf)?",
+                default=True,
+            )
+            if path_choice:
+                export_path = default_path
+                click.echo(f"\nExporting to: {export_path}")
+            else:
+                export_path = click.prompt("\nEnter custom path", type=str)
+
+            pdf_export_memo(export_path, pdf_export)
+        return
     notes_info = get_note()
     note_map = notes_info[0]
     notes_list = notes_info[1]
@@ -112,7 +135,7 @@ def notes(folder, edit, add, delete, move, flist, search, remove, export, view):
         click.echo(f"\n{markdown_content}")
         return
 
-    if not flist and not search and not remove and not export:
+    if not flist and not search and not remove and not export and not pdf_export:
         click.secho("\nFetching notes...", fg="yellow")
         if folder not in folders:
             click.echo("\nThe folder does not exists.")

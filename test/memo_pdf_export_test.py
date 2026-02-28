@@ -1,0 +1,196 @@
+from click.testing import CliRunner
+from memo.memo import cli
+from unittest.mock import patch, MagicMock, call
+import os
+
+
+# --- CLI option tests ---
+
+
+def test_pdf_export_requires_days_argument():
+    runner = CliRunner()
+    result = runner.invoke(cli, ["notes", "--pdf-export"])
+    assert result.exit_code == 2
+    assert "requires an argument" in result.output or "Missing" in result.output
+
+
+def test_pdf_export_rejects_non_integer_days():
+    runner = CliRunner()
+    result = runner.invoke(cli, ["notes", "--pdf-export", "abc"])
+    assert result.exit_code == 2
+
+
+def test_pdf_export_rejects_zero_days():
+    runner = CliRunner()
+    result = runner.invoke(cli, ["notes", "--pdf-export", "0"])
+    assert result.exit_code != 0
+
+
+def test_pdf_export_rejects_negative_days():
+    runner = CliRunner()
+    result = runner.invoke(cli, ["notes", "--pdf-export", "-1"])
+    assert result.exit_code != 0
+
+
+def test_pdf_export_cannot_combine_with_edit():
+    runner = CliRunner()
+    result = runner.invoke(cli, ["notes", "--pdf-export", "7", "--edit"])
+    assert result.exit_code == 2
+
+
+def test_pdf_export_cannot_combine_with_delete():
+    runner = CliRunner()
+    result = runner.invoke(cli, ["notes", "--pdf-export", "7", "--delete"])
+    assert result.exit_code == 2
+
+
+def test_pdf_export_cannot_combine_with_export():
+    runner = CliRunner()
+    result = runner.invoke(cli, ["notes", "--pdf-export", "7", "--export"])
+    assert result.exit_code == 2
+
+
+def test_pdf_export_user_declines_confirmation():
+    runner = CliRunner()
+    result = runner.invoke(cli, ["notes", "--pdf-export", "7"], input="n\n")
+    assert result.exit_code == 0
+
+
+# --- PDF export function tests ---
+
+
+@patch("subprocess.run")
+def test_pdf_export_default_path(mock_subprocess):
+    mock_subprocess.return_value = MagicMock(returncode=0, stderr="", stdout="")
+    runner = CliRunner()
+    result = runner.invoke(cli, ["notes", "--pdf-export", "7"], input="y\ny\n")
+    assert result.exit_code == 0
+
+
+@patch("subprocess.run")
+def test_pdf_export_custom_path(mock_subprocess):
+    mock_subprocess.return_value = MagicMock(returncode=0, stderr="", stdout="")
+    runner = CliRunner()
+    result = runner.invoke(
+        cli, ["notes", "--pdf-export", "7"], input="y\nn\n/tmp/test_export\n"
+    )
+    assert result.exit_code == 0
+
+
+@patch("subprocess.run")
+def test_pdf_export_calls_osascript(mock_subprocess):
+    mock_subprocess.return_value = MagicMock(returncode=0, stderr="", stdout="")
+    runner = CliRunner()
+    runner.invoke(cli, ["notes", "--pdf-export", "30"], input="y\ny\n")
+    calls = mock_subprocess.call_args_list
+    osascript_calls = [c for c in calls if c[0][0][0] == "osascript"]
+    assert len(osascript_calls) > 0
+
+
+@patch("subprocess.run")
+def test_pdf_export_filters_by_modification_date(mock_subprocess):
+    """The AppleScript should filter notes by modification date, not creation date."""
+    mock_subprocess.return_value = MagicMock(returncode=0, stderr="", stdout="")
+    runner = CliRunner()
+    runner.invoke(cli, ["notes", "--pdf-export", "14"], input="y\ny\n")
+    calls = mock_subprocess.call_args_list
+    osascript_calls = [c for c in calls if c[0][0][0] == "osascript"]
+    script_text = str(osascript_calls)
+    assert "modification date" in script_text
+
+
+@patch("subprocess.run")
+def test_pdf_export_uses_correct_day_range(mock_subprocess):
+    """The day range passed to the CLI should appear in the AppleScript date filter."""
+    mock_subprocess.return_value = MagicMock(returncode=0, stderr="", stdout="")
+    runner = CliRunner()
+    runner.invoke(cli, ["notes", "--pdf-export", "21"], input="y\ny\n")
+    calls = mock_subprocess.call_args_list
+    osascript_calls = [c for c in calls if c[0][0][0] == "osascript"]
+    script_text = str(osascript_calls)
+    assert "21" in script_text
+
+
+@patch("subprocess.run")
+def test_pdf_export_uses_print_to_pdf(mock_subprocess):
+    """Should use Apple Notes print-to-PDF via AppleScript, not the built-in HTML converter."""
+    mock_subprocess.return_value = MagicMock(returncode=0, stderr="", stdout="")
+    runner = CliRunner()
+    runner.invoke(cli, ["notes", "--pdf-export", "7"], input="y\ny\n")
+    calls = mock_subprocess.call_args_list
+    osascript_calls = [c for c in calls if c[0][0][0] == "osascript"]
+    script_text = str(osascript_calls).lower()
+    assert "pdf" in script_text or "save" in script_text or "print" in script_text
+
+
+@patch("subprocess.run")
+def test_pdf_export_does_not_modify_note_body(mock_subprocess):
+    """Export must be read-only. The AppleScript should never set/write note properties."""
+    mock_subprocess.return_value = MagicMock(returncode=0, stderr="", stdout="")
+    runner = CliRunner()
+    runner.invoke(cli, ["notes", "--pdf-export", "7"], input="y\ny\n")
+    calls = mock_subprocess.call_args_list
+    osascript_calls = [c for c in calls if c[0][0][0] == "osascript"]
+    for c in osascript_calls:
+        script = str(c)
+        # Should never set the body or name of a note
+        assert "set body of" not in script
+        assert "set name of" not in script
+
+
+@patch("subprocess.run")
+def test_pdf_export_does_not_delete_notes(mock_subprocess):
+    """Export must not delete any notes."""
+    mock_subprocess.return_value = MagicMock(returncode=0, stderr="", stdout="")
+    runner = CliRunner()
+    runner.invoke(cli, ["notes", "--pdf-export", "7"], input="y\ny\n")
+    calls = mock_subprocess.call_args_list
+    osascript_calls = [c for c in calls if c[0][0][0] == "osascript"]
+    for c in osascript_calls:
+        script = str(c)
+        assert "delete" not in script.lower()
+
+
+@patch("subprocess.run")
+def test_pdf_export_does_not_move_notes(mock_subprocess):
+    """Export must not move notes between folders."""
+    mock_subprocess.return_value = MagicMock(returncode=0, stderr="", stdout="")
+    runner = CliRunner()
+    runner.invoke(cli, ["notes", "--pdf-export", "7"], input="y\ny\n")
+    calls = mock_subprocess.call_args_list
+    osascript_calls = [c for c in calls if c[0][0][0] == "osascript"]
+    for c in osascript_calls:
+        script = str(c)
+        assert "move" not in script.lower() or "move note" not in script.lower()
+
+
+@patch("subprocess.run")
+def test_pdf_export_preserves_note_content_unchanged(mock_subprocess):
+    """The export script should only read note properties, never write them back."""
+    mock_subprocess.return_value = MagicMock(returncode=0, stderr="", stdout="")
+    runner = CliRunner()
+    runner.invoke(cli, ["notes", "--pdf-export", "5"], input="y\ny\n")
+    calls = mock_subprocess.call_args_list
+    osascript_calls = [c for c in calls if c[0][0][0] == "osascript"]
+    for c in osascript_calls:
+        script = str(c)
+        # Should not use 'set' on any note property
+        assert "set body" not in script
+        assert "set plaintext" not in script
+        assert "set html" not in script
+
+
+@patch("subprocess.run")
+def test_pdf_export_handles_osascript_failure(mock_subprocess):
+    mock_subprocess.return_value = MagicMock(returncode=1, stderr="error", stdout="")
+    runner = CliRunner()
+    result = runner.invoke(cli, ["notes", "--pdf-export", "7"], input="y\ny\n")
+    assert "error" in result.output.lower() or result.exit_code != 0
+
+
+@patch("subprocess.run")
+def test_pdf_export_success_message(mock_subprocess):
+    mock_subprocess.return_value = MagicMock(returncode=0, stderr="", stdout="")
+    runner = CliRunner()
+    result = runner.invoke(cli, ["notes", "--pdf-export", "7"], input="y\ny\n")
+    assert "export" in result.output.lower() or "pdf" in result.output.lower()

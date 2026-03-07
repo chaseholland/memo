@@ -2,7 +2,68 @@ import subprocess
 import click
 
 
-def pdf_export_memo(path: str, days: int):
+def pdf_export_memo(path: str, days: int, folder: str = ""):
+    if folder:
+        note_collection = f"""
+    -- Collect all folders matching the target name plus their subfolders
+    on collectSubfolders(parentFolder, folderList)
+        tell application "Notes"
+            repeat with childFolder in folders of parentFolder
+                set end of folderList to childFolder
+                my collectSubfolders(childFolder, folderList)
+            end repeat
+        end tell
+        return folderList
+    end collectSubfolders
+
+    tell application "Notes"
+        set targetFolderRef to missing value
+        -- Search all folders in default account for the target name
+        set allFolders to every folder of default account
+        repeat with f in allFolders
+            if name of f is "{folder}" then
+                set targetFolderRef to f
+                exit repeat
+            end if
+        end repeat
+        if targetFolderRef is missing value then
+            error "Folder \\"{folder}\\" not found"
+        end if
+    end tell
+
+    -- Gather the target folder + all descendants
+    set foldersToExport to {{targetFolderRef}}
+    my collectSubfolders(targetFolderRef, foldersToExport)
+
+    set matchingNotes to {{}}
+    tell application "Notes"
+        repeat with aFolder in foldersToExport
+            repeat with theNote in notes of aFolder
+                set noteLocked to password protected of theNote as boolean
+                if not noteLocked then
+                    set modDate to modification date of theNote
+                    if modDate > cutoffDate then
+                        set end of matchingNotes to theNote
+                    end if
+                end if
+            end repeat
+        end repeat
+    end tell"""
+    else:
+        note_collection = """
+    tell application "Notes"
+        set matchingNotes to {{}}
+        repeat with theNote in notes of default account
+            set noteLocked to password protected of theNote as boolean
+            if not noteLocked then
+                set modDate to modification date of theNote
+                if modDate > cutoffDate then
+                    set end of matchingNotes to theNote
+                end if
+            end if
+        end repeat
+    end tell"""
+
     script = f"""
     set exportFolder to "{path}"
     do shell script "mkdir -p " & quoted form of exportFolder
@@ -26,18 +87,7 @@ def pdf_export_memo(path: str, days: int):
 
     set cutoffDate to (current date) - ({days} * days)
 
-    tell application "Notes"
-        set matchingNotes to {{}}
-        repeat with theNote in notes of default account
-            set noteLocked to password protected of theNote as boolean
-            if not noteLocked then
-                set modDate to modification date of theNote
-                if modDate > cutoffDate then
-                    set end of matchingNotes to theNote
-                end if
-            end if
-        end repeat
-    end tell
+    {note_collection}
 
     tell application "Notes"
         activate
@@ -45,12 +95,22 @@ def pdf_export_memo(path: str, days: int):
     delay 1
 
     set savedFiles to {{}}
+    set usedNames to {{}}
 
     repeat with theNote in matchingNotes
         tell application "Notes"
             set noteName to name of theNote as string
         end tell
         set cleanName to my cleanFileName(noteName)
+
+        -- Deduplicate: append counter if name already used
+        set baseName to cleanName
+        set nameCounter to 1
+        repeat while usedNames contains cleanName
+            set nameCounter to nameCounter + 1
+            set cleanName to baseName & "-" & nameCounter
+        end repeat
+        set end of usedNames to cleanName
 
         tell application "Notes"
             activate
@@ -133,8 +193,9 @@ def pdf_export_memo(path: str, days: int):
     """
     result = subprocess.run(["osascript", "-e", script], capture_output=True, text=True)
     if result.returncode == 0:
+        folder_msg = f" from folder '{folder}'" if folder else ""
         click.secho(
-            f"\nNotes modified in the last {days} days exported as PDF to {path}",
+            f"\nNotes{folder_msg} modified in the last {days} days exported as PDF to {path}",
             fg="green",
         )
     else:

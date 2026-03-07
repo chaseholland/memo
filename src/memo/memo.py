@@ -86,7 +86,7 @@ def cli():
     "-pe",
     type=click.IntRange(min=1),
     default=None,
-    help="Export notes modified in the last N days as PDF.",
+    help="Export notes modified in the last N days as PDF. Use --folder to filter by folder.",
 )
 @click.option(
     "--view",
@@ -100,7 +100,8 @@ def notes(folder, edit, add, delete, move, flist, search, remove, export, pdf_ex
         folder, edit, delete, move, add, flist, search, remove, export, view, pdf_export
     )
     if pdf_export:
-        if click.confirm(f"\nExport notes modified in the last {pdf_export} days as PDF?"):
+        folder_msg = f" from folder '{folder}'" if folder else ""
+        if click.confirm(f"\nExport notes{folder_msg} modified in the last {pdf_export} days as PDF?"):
             default_path = os.path.expanduser("~/Desktop/notes_pdf/")
             path_choice = click.confirm(
                 "\nDo you want to export to the default path (Desktop/notes_pdf)?",
@@ -112,7 +113,7 @@ def notes(folder, edit, add, delete, move, flist, search, remove, export, pdf_ex
             else:
                 export_path = click.prompt("\nEnter custom path", type=str)
 
-            pdf_export_memo(export_path, pdf_export)
+            pdf_export_memo(export_path, pdf_export, folder)
         return
     notes_info = get_note()
     note_map = notes_info[0]

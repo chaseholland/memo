@@ -194,3 +194,142 @@ def test_pdf_export_success_message(mock_subprocess):
     runner = CliRunner()
     result = runner.invoke(cli, ["notes", "--pdf-export", "7"], input="y\ny\n")
     assert "export" in result.output.lower() or "pdf" in result.output.lower()
+
+
+# --- Folder filter tests ---
+
+
+def _get_osascript_text(mock_subprocess):
+    """Extract the AppleScript text from the osascript subprocess call."""
+    calls = mock_subprocess.call_args_list
+    osascript_calls = [c for c in calls if c[0][0][0] == "osascript"]
+    assert len(osascript_calls) > 0
+    return osascript_calls[0][0][0][2]  # ["osascript", "-e", <script>]
+
+
+@patch("subprocess.run")
+def test_pdf_export_with_folder_gets_notes_from_folder_directly(mock_subprocess):
+    """When --folder is specified, the script should get notes from that folder directly."""
+    mock_subprocess.return_value = MagicMock(returncode=0, stderr="", stdout="")
+    runner = CliRunner()
+    runner.invoke(
+        cli, ["notes", "--pdf-export", "7", "--folder", "Work"], input="y\ny\n"
+    )
+    script = _get_osascript_text(mock_subprocess)
+    assert 'name of f is "Work"' in script
+    assert "notes of aFolder" in script
+
+
+@patch("subprocess.run")
+def test_pdf_export_without_folder_iterates_all_notes(mock_subprocess):
+    """When no --folder is specified, the script should iterate notes of default account."""
+    mock_subprocess.return_value = MagicMock(returncode=0, stderr="", stdout="")
+    runner = CliRunner()
+    runner.invoke(cli, ["notes", "--pdf-export", "7"], input="y\ny\n")
+    script = _get_osascript_text(mock_subprocess)
+    assert "notes of default account" in script
+    assert "collectSubfolders" not in script
+
+
+@patch("subprocess.run")
+def test_pdf_export_folder_matches_by_name(mock_subprocess):
+    """The folder filter should find the folder by comparing names."""
+    mock_subprocess.return_value = MagicMock(returncode=0, stderr="", stdout="")
+    runner = CliRunner()
+    runner.invoke(
+        cli, ["notes", "--pdf-export", "7", "--folder", "Projects"], input="y\ny\n"
+    )
+    script = _get_osascript_text(mock_subprocess)
+    assert 'name of f is "Projects"' in script
+
+
+@patch("subprocess.run")
+def test_pdf_export_folder_collects_subfolders_recursively(mock_subprocess):
+    """The folder filter should recursively collect subfolders for export."""
+    mock_subprocess.return_value = MagicMock(returncode=0, stderr="", stdout="")
+    runner = CliRunner()
+    runner.invoke(
+        cli, ["notes", "--pdf-export", "7", "--folder", "Work"], input="y\ny\n"
+    )
+    script = _get_osascript_text(mock_subprocess)
+    assert "collectSubfolders" in script
+    assert "folders of parentFolder" in script
+
+
+@patch("subprocess.run")
+def test_pdf_export_folder_errors_if_not_found(mock_subprocess):
+    """The script should error if the specified folder does not exist."""
+    mock_subprocess.return_value = MagicMock(returncode=0, stderr="", stdout="")
+    runner = CliRunner()
+    runner.invoke(
+        cli, ["notes", "--pdf-export", "7", "--folder", "Work"], input="y\ny\n"
+    )
+    script = _get_osascript_text(mock_subprocess)
+    assert 'Folder \\"Work\\" not found' in script or "not found" in script.lower()
+
+
+@patch("subprocess.run")
+def test_pdf_export_without_folder_has_no_subfolder_logic(mock_subprocess):
+    """Without --folder, there should be no subfolder collection logic."""
+    mock_subprocess.return_value = MagicMock(returncode=0, stderr="", stdout="")
+    runner = CliRunner()
+    runner.invoke(cli, ["notes", "--pdf-export", "7"], input="y\ny\n")
+    script = _get_osascript_text(mock_subprocess)
+    assert "collectSubfolders" not in script
+    assert "foldersToExport" not in script
+
+
+@patch("subprocess.run")
+def test_pdf_export_folder_confirm_message_includes_folder(mock_subprocess):
+    """The confirmation prompt should mention the folder name when filtering."""
+    mock_subprocess.return_value = MagicMock(returncode=0, stderr="", stdout="")
+    runner = CliRunner()
+    result = runner.invoke(
+        cli, ["notes", "--pdf-export", "7", "--folder", "Recipes"], input="y\ny\n"
+    )
+    assert "Recipes" in result.output
+
+
+@patch("subprocess.run")
+def test_pdf_export_folder_confirm_message_without_folder(mock_subprocess):
+    """Without --folder, the confirmation prompt should not mention any folder."""
+    mock_subprocess.return_value = MagicMock(returncode=0, stderr="", stdout="")
+    runner = CliRunner()
+    result = runner.invoke(cli, ["notes", "--pdf-export", "7"], input="y\ny\n")
+    assert "from folder" not in result.output
+
+
+@patch("subprocess.run")
+def test_pdf_export_folder_success_message_includes_folder(mock_subprocess):
+    """The success message should mention the folder when one was specified."""
+    mock_subprocess.return_value = MagicMock(returncode=0, stderr="", stdout="")
+    runner = CliRunner()
+    result = runner.invoke(
+        cli, ["notes", "--pdf-export", "7", "--folder", "Recipes"], input="y\ny\n"
+    )
+    assert "from folder 'Recipes'" in result.output
+
+
+@patch("subprocess.run")
+def test_pdf_export_folder_does_not_hardcode_wrong_folder(mock_subprocess):
+    """The script should use the user-specified folder, not a hardcoded value."""
+    mock_subprocess.return_value = MagicMock(returncode=0, stderr="", stdout="")
+    runner = CliRunner()
+    runner.invoke(
+        cli, ["notes", "--pdf-export", "7", "--folder", "Travel"], input="y\ny\n"
+    )
+    script = _get_osascript_text(mock_subprocess)
+    assert 'name of f is "Travel"' in script
+    assert "Work" not in script
+    assert "Projects" not in script
+
+
+@patch("subprocess.run")
+def test_pdf_export_deduplicates_filenames(mock_subprocess):
+    """The script should append a counter to duplicate filenames to prevent overwrites."""
+    mock_subprocess.return_value = MagicMock(returncode=0, stderr="", stdout="")
+    runner = CliRunner()
+    runner.invoke(cli, ["notes", "--pdf-export", "7"], input="y\ny\n")
+    script = _get_osascript_text(mock_subprocess)
+    assert "usedNames" in script
+    assert "nameCounter" in script

@@ -89,31 +89,40 @@ def cli():
     help="Export notes modified in the last N days as PDF. Use --folder to filter by folder.",
 )
 @click.option(
+    "--export-path",
+    "-ep",
+    default=None,
+    help="Destination path for --pdf-export. Skips interactive prompts when provided.",
+)
+@click.option(
     "--view",
     "-v",
     type=int,
     default=None,
     help="Display the content of note N from the list.",
 )
-def notes(folder, edit, add, delete, move, flist, search, remove, export, pdf_export, view):
+def notes(folder, edit, add, delete, move, flist, search, remove, export, pdf_export, export_path, view):
     selection_notes_validation(
         folder, edit, delete, move, add, flist, search, remove, export, view, pdf_export
     )
     if pdf_export:
         folder_msg = f" from folder '{folder}'" if folder else ""
-        if click.confirm(f"\nExport notes{folder_msg} modified in the last {pdf_export} days as PDF?"):
-            default_path = os.path.expanduser("~/Desktop/notes_pdf/")
-            path_choice = click.confirm(
-                "\nDo you want to export to the default path (Desktop/notes_pdf)?",
-                default=True,
-            )
-            if path_choice:
-                export_path = default_path
-                click.echo(f"\nExporting to: {export_path}")
-            else:
-                export_path = click.prompt("\nEnter custom path", type=str)
-
+        if export_path:
             pdf_export_memo(export_path, pdf_export, folder)
+        else:
+            if click.confirm(f"\nExport notes{folder_msg} modified in the last {pdf_export} days as PDF?"):
+                default_path = os.path.expanduser("~/Desktop/notes_pdf/")
+                path_choice = click.confirm(
+                    "\nDo you want to export to the default path (Desktop/notes_pdf)?",
+                    default=True,
+                )
+                if path_choice:
+                    export_path = default_path
+                    click.echo(f"\nExporting to: {export_path}")
+                else:
+                    export_path = click.prompt("\nEnter custom path", type=str)
+
+                pdf_export_memo(export_path, pdf_export, folder)
         return
     notes_info = get_note()
     note_map = notes_info[0]

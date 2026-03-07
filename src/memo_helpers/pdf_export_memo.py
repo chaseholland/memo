@@ -1,11 +1,52 @@
 import subprocess
+import os
+import glob
+import shutil
 import click
+
+
+def move_pdfs_to_export_folder(saved_files: list, export_folder: str) -> int:
+    """Move exported PDFs from common default save locations to export_folder.
+
+    Searches ~/Desktop, ~/Documents, ~/Downloads, and ~/ in order, then falls
+    back to a recursive search (max depth 4) under ~/ if not found.
+
+    Returns the count of successfully moved files.
+    """
+    home = os.path.expanduser("~")
+    search_dirs = [
+        os.path.join(home, "Desktop"),
+        os.path.join(home, "Documents"),
+        os.path.join(home, "Downloads"),
+        home,
+    ]
+
+    moved = 0
+    for file_name in saved_files:
+        pdf_name = file_name + ".pdf"
+        dest = os.path.join(export_folder, pdf_name)
+        found = False
+        for search_dir in search_dirs:
+            src = os.path.join(search_dir, pdf_name)
+            if os.path.isfile(src):
+                shutil.move(src, dest)
+                moved += 1
+                found = True
+                break
+        if not found:
+            home_depth = len(os.path.normpath(home).split(os.sep))
+            for match in glob.glob(os.path.join(home, "**", pdf_name), recursive=True):
+                match_depth = len(os.path.normpath(match).split(os.sep))
+                if match_depth - home_depth <= 4:
+                    shutil.move(match, dest)
+                    moved += 1
+                    break
+    return moved
 
 
 def pdf_export_memo(path: str, days: int, folder: str = ""):
     if folder:
         note_collection = f"""
-    -- Collect all folders matching the target name plus their subfolders
     on collectSubfolders(parentFolder, folderList)
         tell application "Notes"
             repeat with childFolder in folders of parentFolder
@@ -18,7 +59,6 @@ def pdf_export_memo(path: str, days: int, folder: str = ""):
 
     tell application "Notes"
         set targetFolderRef to missing value
-        -- Search all folders in default account for the target name
         set allFolders to every folder of default account
         repeat with f in allFolders
             if name of f is "{folder}" then
@@ -31,7 +71,6 @@ def pdf_export_memo(path: str, days: int, folder: str = ""):
         end if
     end tell
 
-    -- Gather the target folder + all descendants
     set foldersToExport to {{targetFolderRef}}
     my collectSubfolders(targetFolderRef, foldersToExport)
 
@@ -52,7 +91,7 @@ def pdf_export_memo(path: str, days: int, folder: str = ""):
     else:
         note_collection = """
     tell application "Notes"
-        set matchingNotes to {{}}
+        set matchingNotes to {}
         repeat with theNote in notes of default account
             set noteLocked to password protected of theNote as boolean
             if not noteLocked then
@@ -86,6 +125,7 @@ def pdf_export_memo(path: str, days: int, folder: str = ""):
     end cleanFileName
 
     set cutoffDate to (current date) - ({days} * days)
+    set exportTimestamp to do shell script "date '+%Y-%m-%d_%H-%M-%S'"
 
     {note_collection}
 
@@ -95,22 +135,15 @@ def pdf_export_memo(path: str, days: int, folder: str = ""):
     delay 1
 
     set savedFiles to {{}}
-    set usedNames to {{}}
 
     repeat with theNote in matchingNotes
         tell application "Notes"
             set noteName to name of theNote as string
         end tell
-        set cleanName to my cleanFileName(noteName)
-
-        -- Deduplicate: append counter if name already used
-        set baseName to cleanName
-        set nameCounter to 1
-        repeat while usedNames contains cleanName
-            set nameCounter to nameCounter + 1
-            set cleanName to baseName & "-" & nameCounter
-        end repeat
-        set end of usedNames to cleanName
+        set cleanName to exportTimestamp & " - " & my cleanFileName(noteName)
+        if length of cleanName > 250 then
+            set cleanName to text 1 thru 250 of cleanName
+        end if
 
         tell application "Notes"
             activate
@@ -122,7 +155,6 @@ def pdf_export_memo(path: str, days: int, folder: str = ""):
             tell process "Notes"
                 set frontmost to true
                 delay 0.5
-                -- Wait for window with no sheets
                 repeat 20 times
                     try
                         if (count of windows) > 0 and (count of sheets of window 1) = 0 then exit repeat
@@ -130,7 +162,6 @@ def pdf_export_memo(path: str, days: int, folder: str = ""):
                     delay 0.5
                 end repeat
                 delay 0.5
-                -- Open print dialog
                 keystroke "p" using command down
                 repeat 20 times
                     try
@@ -144,7 +175,6 @@ def pdf_export_memo(path: str, days: int, folder: str = ""):
                 click pdfMenuBtn
                 delay 0.5
                 click menu item 1 of menu 1 of pdfMenuBtn
-                -- Wait for save sheet
                 repeat 20 times
                     try
                         if (count of sheets of sheet 1 of window 1) > 0 then exit repeat
@@ -154,13 +184,10 @@ def pdf_export_memo(path: str, days: int, folder: str = ""):
                 delay 1
                 set saveSheet to sheet 1 of sheet 1 of window 1
                 set saveSplitter to splitter group 1 of saveSheet
-                -- Set filename only (not path)
                 set value of text field "Save As:" of saveSplitter to cleanName
                 delay 0.5
-                -- Click Save (saves to whatever default location the dialog has)
                 click button "Save" of saveSplitter
                 delay 2
-                -- Handle Replace if file exists
                 try
                     if (count of sheets of saveSheet) > 0 then
                         click button "Replace" of sheet 1 of saveSheet
@@ -174,28 +201,25 @@ def pdf_export_memo(path: str, days: int, folder: str = ""):
         set end of savedFiles to cleanName
     end repeat
 
-    -- Move all saved PDFs to the export folder
-    -- The save dialog defaults to the last used location; find and move the files
-    set homePath to POSIX path of (path to home folder)
-    set searchPaths to {{homePath & "Desktop/", homePath & "Documents/", homePath & "Downloads/", homePath}}
+    -- Return saved filenames for Python to move to the target folder
+    set output to ""
     repeat with fileName in savedFiles
-        set pdfName to fileName & ".pdf"
-        set destPath to exportFolder & pdfName
-        repeat with searchPath in searchPaths
-            set srcPath to searchPath & pdfName
-            try
-                do shell script "test -f " & quoted form of srcPath
-                do shell script "mv -f " & quoted form of srcPath & " " & quoted form of destPath
-                exit repeat
-            end try
-        end repeat
+        if output is not "" then
+            set output to output & "\\n"
+        end if
+        set output to output & fileName
     end repeat
+    return output
     """
+
     result = subprocess.run(["osascript", "-e", script], capture_output=True, text=True)
     if result.returncode == 0:
+        saved_files = [f for f in result.stdout.strip().split("\n") if f]
+        os.makedirs(path, exist_ok=True)
+        move_pdfs_to_export_folder(saved_files, path)
         folder_msg = f" from folder '{folder}'" if folder else ""
         click.secho(
-            f"\nNotes{folder_msg} modified in the last {days} days exported as PDF to {path}",
+            f"\n{len(saved_files)} note(s){folder_msg} modified in the last {days} days exported as PDF to {path}",
             fg="green",
         )
     else:

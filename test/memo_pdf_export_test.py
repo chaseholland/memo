@@ -1,6 +1,7 @@
 from click.testing import CliRunner
 from memo.memo import cli
-from unittest.mock import patch, MagicMock, call
+from memo_helpers.pdf_export_memo import move_pdfs_to_export_folder
+from unittest.mock import patch, MagicMock
 import os
 
 
@@ -112,15 +113,15 @@ def test_pdf_export_uses_correct_day_range(mock_subprocess):
 
 
 @patch("subprocess.run")
-def test_pdf_export_uses_print_to_pdf(mock_subprocess):
-    """Should use Apple Notes print-to-PDF via AppleScript, not the built-in HTML converter."""
+def test_pdf_export_reads_note_name(mock_subprocess):
+    """Should read the note name to use as the PDF filename."""
     mock_subprocess.return_value = MagicMock(returncode=0, stderr="", stdout="")
     runner = CliRunner()
     runner.invoke(cli, ["notes", "--pdf-export", "7"], input="y\ny\n")
     calls = mock_subprocess.call_args_list
     osascript_calls = [c for c in calls if c[0][0][0] == "osascript"]
-    script_text = str(osascript_calls).lower()
-    assert "pdf" in script_text or "save" in script_text or "print" in script_text
+    script_text = str(osascript_calls)
+    assert "name of theNote" in script_text
 
 
 @patch("subprocess.run")
@@ -325,11 +326,155 @@ def test_pdf_export_folder_does_not_hardcode_wrong_folder(mock_subprocess):
 
 
 @patch("subprocess.run")
-def test_pdf_export_deduplicates_filenames(mock_subprocess):
-    """The script should append a counter to duplicate filenames to prevent overwrites."""
+def test_pdf_export_filenames_include_timestamp(mock_subprocess):
+    """Exported filenames should include a timestamp prefix to prevent conflicts."""
     mock_subprocess.return_value = MagicMock(returncode=0, stderr="", stdout="")
     runner = CliRunner()
     runner.invoke(cli, ["notes", "--pdf-export", "7"], input="y\ny\n")
     script = _get_osascript_text(mock_subprocess)
-    assert "usedNames" in script
-    assert "nameCounter" in script
+    assert "exportTimestamp" in script
+
+
+@patch("subprocess.run")
+def test_pdf_export_uses_print_to_pdf(mock_subprocess):
+    """Should use macOS print-to-PDF GUI automation via System Events."""
+    mock_subprocess.return_value = MagicMock(returncode=0, stderr="", stdout="")
+    runner = CliRunner()
+    runner.invoke(cli, ["notes", "--pdf-export", "7"], input="y\ny\n")
+    script = _get_osascript_text(mock_subprocess)
+    assert "keystroke" in script
+    assert "System Events" in script
+
+
+# --- move_pdfs_to_export_folder tests ---
+
+
+def test_move_finds_file_in_documents(tmp_path, monkeypatch):
+    docs = tmp_path / "Documents"
+    docs.mkdir()
+    dest = tmp_path / "export"
+    dest.mkdir()
+    (docs / "2026-01-01_10-00-00 - My Note.pdf").write_text("pdf")
+    monkeypatch.setattr(os.path, "expanduser", lambda p: str(tmp_path) if p == "~" else p)
+
+    moved = move_pdfs_to_export_folder(
+        ["2026-01-01_10-00-00 - My Note"],
+        str(dest) + "/",
+    )
+
+    assert moved == 1
+    assert (dest / "2026-01-01_10-00-00 - My Note.pdf").exists()
+    assert not (docs / "2026-01-01_10-00-00 - My Note.pdf").exists()
+
+
+def test_move_finds_file_in_desktop(tmp_path, monkeypatch):
+    desktop = tmp_path / "Desktop"
+    desktop.mkdir()
+    dest = tmp_path / "export"
+    dest.mkdir()
+    (desktop / "note.pdf").write_text("pdf")
+    monkeypatch.setattr(os.path, "expanduser", lambda p: str(tmp_path) if p == "~" else p)
+
+    moved = move_pdfs_to_export_folder(["note"], str(dest) + "/")
+
+    assert moved == 1
+    assert (dest / "note.pdf").exists()
+
+
+def test_move_finds_file_in_downloads(tmp_path, monkeypatch):
+    downloads = tmp_path / "Downloads"
+    downloads.mkdir()
+    dest = tmp_path / "export"
+    dest.mkdir()
+    (downloads / "note.pdf").write_text("pdf")
+    monkeypatch.setattr(os.path, "expanduser", lambda p: str(tmp_path) if p == "~" else p)
+
+    moved = move_pdfs_to_export_folder(["note"], str(dest) + "/")
+
+    assert moved == 1
+    assert (dest / "note.pdf").exists()
+
+
+def test_move_only_moves_targeted_files(tmp_path, monkeypatch):
+    docs = tmp_path / "Documents"
+    docs.mkdir()
+    dest = tmp_path / "export"
+    dest.mkdir()
+    (docs / "target.pdf").write_text("pdf")
+    (docs / "unrelated.pdf").write_text("pdf")
+    monkeypatch.setattr(os.path, "expanduser", lambda p: str(tmp_path) if p == "~" else p)
+
+    move_pdfs_to_export_folder(["target"], str(dest) + "/")
+
+    assert (dest / "target.pdf").exists()
+    assert not (dest / "unrelated.pdf").exists()
+    assert (docs / "unrelated.pdf").exists()
+
+
+def test_move_missing_file_not_counted(tmp_path, monkeypatch):
+    dest = tmp_path / "export"
+    dest.mkdir()
+    monkeypatch.setattr(os.path, "expanduser", lambda p: str(tmp_path) if p == "~" else p)
+
+    moved = move_pdfs_to_export_folder(["nonexistent"], str(dest) + "/")
+
+    assert moved == 0
+    assert list(dest.iterdir()) == []
+
+
+def test_move_multiple_files(tmp_path, monkeypatch):
+    docs = tmp_path / "Documents"
+    docs.mkdir()
+    desktop = tmp_path / "Desktop"
+    desktop.mkdir()
+    dest = tmp_path / "export"
+    dest.mkdir()
+    (docs / "note-a.pdf").write_text("pdf")
+    (desktop / "note-b.pdf").write_text("pdf")
+    monkeypatch.setattr(os.path, "expanduser", lambda p: str(tmp_path) if p == "~" else p)
+
+    moved = move_pdfs_to_export_folder(["note-a", "note-b"], str(dest) + "/")
+
+    assert moved == 2
+    assert (dest / "note-a.pdf").exists()
+    assert (dest / "note-b.pdf").exists()
+
+
+def test_move_prefers_desktop_over_documents(tmp_path, monkeypatch):
+    """Desktop is searched before Documents; file in Desktop should win."""
+    desktop = tmp_path / "Desktop"
+    desktop.mkdir()
+    docs = tmp_path / "Documents"
+    docs.mkdir()
+    dest = tmp_path / "export"
+    dest.mkdir()
+    (desktop / "note.pdf").write_text("desktop-version")
+    (docs / "note.pdf").write_text("docs-version")
+    monkeypatch.setattr(os.path, "expanduser", lambda p: str(tmp_path) if p == "~" else p)
+
+    move_pdfs_to_export_folder(["note"], str(dest) + "/")
+
+    assert (dest / "note.pdf").read_text() == "desktop-version"
+
+
+def test_move_fallback_finds_nested_file(tmp_path, monkeypatch):
+    nested = tmp_path / "sub1" / "sub2"
+    nested.mkdir(parents=True)
+    dest = tmp_path / "export"
+    dest.mkdir()
+    (nested / "deep-note.pdf").write_text("pdf")
+    monkeypatch.setattr(os.path, "expanduser", lambda p: str(tmp_path) if p == "~" else p)
+
+    moved = move_pdfs_to_export_folder(["deep-note"], str(dest) + "/")
+
+    assert moved == 1
+    assert (dest / "deep-note.pdf").exists()
+
+
+def test_move_empty_list_returns_zero(tmp_path):
+    dest = tmp_path / "export"
+    dest.mkdir()
+
+    moved = move_pdfs_to_export_folder([], str(dest) + "/")
+
+    assert moved == 0

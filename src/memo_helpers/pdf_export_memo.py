@@ -149,7 +149,7 @@ def pdf_export_memo(path: str, days: int, folder: str = ""):
             activate
             show theNote
         end tell
-        delay 2
+        delay 15
 
         tell application "System Events"
             tell process "Notes"

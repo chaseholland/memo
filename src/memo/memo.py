@@ -17,6 +17,7 @@ from memo_helpers.validation_memo import selection_notes_validation
 from memo_helpers.search_memo import fuzzy_notes
 from memo_helpers.export_memo import export_memo
 from memo_helpers.pdf_export_memo import pdf_export_memo
+from memo_helpers.pdf_render_memo import pdf_render_memo
 from memo_helpers.id_search_memo import id_search_memo
 from memo_helpers.md_converter import md_converter
 
@@ -95,16 +96,39 @@ def cli():
     help="Destination path for --pdf-export. Skips interactive prompts when provided.",
 )
 @click.option(
+    "--render-pdf",
+    "-rp",
+    is_flag=True,
+    help="Headless PDF export of handwritten notes. Use --folder and --pdf-export N to filter.",
+)
+@click.option(
     "--view",
     "-v",
     type=int,
     default=None,
     help="Display the content of note N from the list.",
 )
-def notes(folder, edit, add, delete, move, flist, search, remove, export, pdf_export, export_path, view):
+def notes(folder, edit, add, delete, move, flist, search, remove, export, pdf_export, export_path, render_pdf, view):
     selection_notes_validation(
         folder, edit, delete, move, add, flist, search, remove, export, view, pdf_export
     )
+    if render_pdf:
+        days = pdf_export  # reuse --pdf-export N for day filtering
+        if export_path:
+            pdf_render_memo(export_path, days=days, folder=folder)
+        else:
+            default_path = os.path.expanduser("~/Desktop/notes_pdf/")
+            path_choice = click.confirm(
+                "\nExport to default path (Desktop/notes_pdf)?",
+                default=True,
+            )
+            if path_choice:
+                export_path = default_path
+            else:
+                export_path = click.prompt("\nEnter custom path", type=str)
+            click.echo(f"\nExporting to: {export_path}")
+            pdf_render_memo(export_path, days=days, folder=folder)
+        return
     if pdf_export:
         folder_msg = f" from folder '{folder}'" if folder else ""
         if export_path:

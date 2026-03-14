@@ -278,14 +278,14 @@ def parse_bundle(db_path):
     tmp = tempfile.NamedTemporaryFile(suffix=".sqlite3", delete=False)
     tmp.close()
     tmp_files = [tmp.name]
-    shutil.copy2(db_path, tmp.name)
-    for ext in ("-wal", "-shm"):
-        src = db_path + ext
-        if os.path.isfile(src):
-            shutil.copy2(src, tmp.name + ext)
-            tmp_files.append(tmp.name + ext)
-
     try:
+        shutil.copy2(db_path, tmp.name)
+        for ext in ("-wal", "-shm"):
+            src = db_path + ext
+            if os.path.isfile(src):
+                shutil.copy2(src, tmp.name + ext)
+                tmp_files.append(tmp.name + ext)
+
         conn = sqlite3.connect(tmp.name)
         rows = conn.execute("SELECT Id, Data FROM Reference").fetchall()
         conn.close()

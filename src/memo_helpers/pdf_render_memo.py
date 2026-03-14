@@ -60,7 +60,7 @@ def pdf_render_memo(path, days=None, folder="", title=None):
 
 def _sanitize_filename(name):
     """Remove/replace characters that are invalid in filenames."""
-    invalid = ':/\\<>"|?*'
+    invalid = ':/\\<>"|?*\n\r\t\x00'
     for ch in invalid:
         name = name.replace(ch, "-")
     if len(name) > 250:

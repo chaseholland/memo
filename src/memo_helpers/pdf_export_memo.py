@@ -5,6 +5,15 @@ import shutil
 import click
 
 
+def _escape_applescript_string(s: str) -> str:
+    """Escape a string for safe embedding in an AppleScript double-quoted literal."""
+    s = s.replace("\\", "\\\\")  # must be first
+    s = s.replace('"', '\\"')
+    s = s.replace("\n", "\\n")
+    s = s.replace("\r", "\\r")
+    return s
+
+
 def move_pdfs_to_export_folder(saved_files: list, export_folder: str) -> int:
     """Move exported PDFs from common default save locations to export_folder.
 
@@ -35,7 +44,7 @@ def move_pdfs_to_export_folder(saved_files: list, export_folder: str) -> int:
                 break
         if not found:
             home_depth = len(os.path.normpath(home).split(os.sep))
-            for match in glob.glob(os.path.join(home, "**", pdf_name), recursive=True):
+            for match in glob.glob(os.path.join(home, "**", glob.escape(pdf_name)), recursive=True):
                 match_depth = len(os.path.normpath(match).split(os.sep))
                 if match_depth - home_depth <= 4:
                     shutil.move(match, dest)
@@ -45,7 +54,9 @@ def move_pdfs_to_export_folder(saved_files: list, export_folder: str) -> int:
 
 
 def pdf_export_memo(path: str, days: int, folder: str = ""):
+    safe_path = _escape_applescript_string(path)
     if folder:
+        safe_folder = _escape_applescript_string(folder)
         note_collection = f"""
     on collectSubfolders(parentFolder, folderList)
         tell application "Notes"
@@ -61,13 +72,13 @@ def pdf_export_memo(path: str, days: int, folder: str = ""):
         set targetFolderRef to missing value
         set allFolders to every folder of default account
         repeat with f in allFolders
-            if name of f is "{folder}" then
+            if name of f is "{safe_folder}" then
                 set targetFolderRef to f
                 exit repeat
             end if
         end repeat
         if targetFolderRef is missing value then
-            error "Folder \\"{folder}\\" not found"
+            error "Folder \\"{safe_folder}\\" not found"
         end if
     end tell
 
@@ -104,7 +115,7 @@ def pdf_export_memo(path: str, days: int, folder: str = ""):
     end tell"""
 
     script = f"""
-    set exportFolder to "{path}"
+    set exportFolder to "{safe_path}"
     do shell script "mkdir -p " & quoted form of exportFolder
 
     on cleanFileName(t)

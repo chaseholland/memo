@@ -262,6 +262,30 @@ def _extract_default_width(metadata):
     return 2.0
 
 
+def count_bundle_rows(db_path):
+    """Quick row count from a Paper bundle without full parsing."""
+    tmp = tempfile.NamedTemporaryFile(suffix=".sqlite3", delete=False)
+    tmp.close()
+    tmp_files = [tmp.name]
+    try:
+        shutil.copy2(db_path, tmp.name)
+        for ext in ("-wal", "-shm"):
+            src = db_path + ext
+            if os.path.isfile(src):
+                shutil.copy2(src, tmp.name + ext)
+                tmp_files.append(tmp.name + ext)
+        conn = sqlite3.connect(tmp.name)
+        count = conn.execute("SELECT count(*) FROM Reference").fetchone()[0]
+        conn.close()
+        return count
+    except Exception:
+        return 0
+    finally:
+        for f in tmp_files:
+            if os.path.isfile(f):
+                os.unlink(f)
+
+
 # --- Main parser ---
 
 def parse_bundle(db_path):

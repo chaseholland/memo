@@ -93,13 +93,14 @@ def cli():
     "--export-path",
     "-ep",
     default=None,
-    help="Destination path for --pdf-export. Skips interactive prompts when provided.",
+    help="Destination path for --pdf-export or --render-pdf. Skips interactive prompts.",
 )
 @click.option(
     "--render-pdf",
     "-rp",
-    is_flag=True,
-    help="Headless PDF export of handwritten notes. Use --folder and --pdf-export N to filter.",
+    type=click.IntRange(min=1),
+    default=None,
+    help="Headless PDF export of handwritten notes modified in the last N days.",
 )
 @click.option(
     "--view",
@@ -110,10 +111,11 @@ def cli():
 )
 def notes(folder, edit, add, delete, move, flist, search, remove, export, pdf_export, export_path, render_pdf, view):
     selection_notes_validation(
-        folder, edit, delete, move, add, flist, search, remove, export, view, pdf_export
+        folder, edit, delete, move, add, flist, search, remove, export, view,
+        pdf_export, render_pdf,
     )
     if render_pdf:
-        days = pdf_export  # reuse --pdf-export N for day filtering
+        days = render_pdf
         if export_path:
             pdf_render_memo(export_path, days=days, folder=folder)
         else:

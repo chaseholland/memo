@@ -36,7 +36,7 @@ def find_paper_notes(title=None, folder=None, days=None):
     """
     conn, tmp_path = _open_notestore()
     try:
-        # Find notes with paper attachments
+        # Find notes with paper attachments, joining folder inline
         query = """
             SELECT
                 note.Z_PK as note_pk,
@@ -44,10 +44,13 @@ def find_paper_notes(title=None, folder=None, days=None):
                 att.Z_PK as attachment_pk,
                 att.ZIDENTIFIER as attachment_uuid,
                 att.ZTYPEUTI as type_uti,
-                note.ZMODIFICATIONDATE1 as mod_date,
-                note.ZMARKEDFORDELETION as deleted
+                note.ZMODIFICATIONDATE1 as note_mod,
+                att.ZMODIFICATIONDATE as att_mod,
+                note.ZMARKEDFORDELETION as deleted,
+                folder.ZTITLE2 as folder_name
             FROM ZICCLOUDSYNCINGOBJECT att
             JOIN ZICCLOUDSYNCINGOBJECT note ON att.ZNOTE = note.Z_PK
+            LEFT JOIN ZICCLOUDSYNCINGOBJECT folder ON note.ZFOLDER = folder.Z_PK
             WHERE att.ZTYPEUTI IN ('com.apple.paper', 'com.apple.drawing.2')
               AND (note.ZMARKEDFORDELETION IS NULL OR note.ZMARKEDFORDELETION = 0)
         """
@@ -57,15 +60,34 @@ def find_paper_notes(title=None, folder=None, days=None):
             query += " AND note.ZTITLE1 LIKE ?"
             params.append(f"%{title}%")
 
+        if folder:
+            # Recursive CTE to find the target folder and all descendants
+            query = """
+                WITH RECURSIVE folder_tree(Z_PK) AS (
+                    SELECT Z_PK FROM ZICCLOUDSYNCINGOBJECT
+                    WHERE ZTITLE2 = ? COLLATE NOCASE
+                    UNION ALL
+                    SELECT child.Z_PK FROM ZICCLOUDSYNCINGOBJECT child
+                    JOIN folder_tree ft ON child.ZPARENT = ft.Z_PK
+                )
+            """ + query + " AND note.ZFOLDER IN (SELECT Z_PK FROM folder_tree)"
+            params.insert(0, folder)
+
         if days:
             # Apple stores dates as seconds since 2001-01-01 (Core Data epoch)
+            # Check both note and attachment modification dates — handwriting
+            # edits update the attachment date but not always the note date.
             epoch_2001 = datetime(2001, 1, 1)
             cutoff = datetime.now() - timedelta(days=days)
             cutoff_cd = (cutoff - epoch_2001).total_seconds()
-            query += " AND note.ZMODIFICATIONDATE1 > ?"
-            params.append(cutoff_cd)
+            query += (
+                " AND (note.ZMODIFICATIONDATE1 > ?"
+                "  OR att.ZMODIFICATIONDATE > ?)"
+            )
+            params.extend([cutoff_cd, cutoff_cd])
 
-        query += " ORDER BY note.ZMODIFICATIONDATE1 DESC"
+        query += " ORDER BY MAX(COALESCE(note.ZMODIFICATIONDATE1, 0),"
+        query += " COALESCE(att.ZMODIFICATIONDATE, 0)) DESC"
 
         rows = conn.execute(query, params).fetchall()
 
@@ -103,36 +125,11 @@ def find_paper_notes(title=None, folder=None, days=None):
                     })
                     break
 
-        if folder:
-            results = _filter_by_folder(conn, results, folder)
-
         return results
     finally:
         conn.close()
         os.unlink(tmp_path)
 
-
-def _filter_by_folder(conn, results, folder):
-    """Filter results to only include notes in the given folder (or subfolders)."""
-    # Get folder names for each note via the ZSECTION (folder) FK
-    note_pks = [r["note_pk"] for r in results]
-    if not note_pks:
-        return results
-
-    placeholders = ",".join("?" * len(note_pks))
-    folder_query = f"""
-        SELECT note.Z_PK as note_pk, folder.ZTITLE2 as folder_name
-        FROM ZICCLOUDSYNCINGOBJECT note
-        JOIN ZICCLOUDSYNCINGOBJECT folder ON note.ZFOLDER = folder.Z_PK
-        WHERE note.Z_PK IN ({placeholders})
-    """
-    rows = conn.execute(folder_query, note_pks).fetchall()
-    note_folders = {row["note_pk"]: row["folder_name"] for row in rows}
-
-    return [
-        r for r in results
-        if note_folders.get(r["note_pk"], "").lower() == folder.lower()
-    ]
 
 
 def _paper_bundle_path(account_uuid, attachment_uuid):

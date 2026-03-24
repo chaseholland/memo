@@ -478,3 +478,86 @@ def test_move_empty_list_returns_zero(tmp_path):
     moved = move_pdfs_to_export_folder([], str(dest) + "/")
 
     assert moved == 0
+
+
+# --- render-pdf CLI option tests ---
+
+
+def test_render_pdf_requires_days_argument():
+    runner = CliRunner()
+    result = runner.invoke(cli, ["notes", "--render-pdf"])
+    assert result.exit_code == 2
+    assert "requires an argument" in result.output or "Missing" in result.output
+
+
+def test_render_pdf_rejects_non_integer_days():
+    runner = CliRunner()
+    result = runner.invoke(cli, ["notes", "--render-pdf", "abc"])
+    assert result.exit_code == 2
+
+
+def test_render_pdf_rejects_zero_days():
+    runner = CliRunner()
+    result = runner.invoke(cli, ["notes", "--render-pdf", "0"])
+    assert result.exit_code != 0
+
+
+def test_render_pdf_rejects_negative_days():
+    runner = CliRunner()
+    result = runner.invoke(cli, ["notes", "--render-pdf", "-1"])
+    assert result.exit_code != 0
+
+
+def test_render_pdf_cannot_combine_with_pdf_export():
+    runner = CliRunner()
+    result = runner.invoke(cli, ["notes", "--render-pdf", "7", "--pdf-export", "7"])
+    assert result.exit_code == 2
+    assert "Only one of" in result.output
+
+
+def test_render_pdf_cannot_combine_with_edit():
+    runner = CliRunner()
+    result = runner.invoke(cli, ["notes", "--render-pdf", "7", "--edit"])
+    assert result.exit_code == 2
+    assert "Only one of" in result.output
+
+
+def test_render_pdf_cannot_combine_with_delete():
+    runner = CliRunner()
+    result = runner.invoke(cli, ["notes", "--render-pdf", "7", "--delete"])
+    assert result.exit_code == 2
+    assert "Only one of" in result.output
+
+
+def test_render_pdf_cannot_combine_with_export():
+    runner = CliRunner()
+    result = runner.invoke(cli, ["notes", "--render-pdf", "7", "--export"])
+    assert result.exit_code == 2
+    assert "Only one of" in result.output
+
+
+def test_render_pdf_cannot_combine_with_view():
+    runner = CliRunner()
+    result = runner.invoke(cli, ["notes", "--render-pdf", "7", "--view", "1"])
+    assert result.exit_code == 2
+    assert "Only one of" in result.output
+
+
+@patch("memo.memo.pdf_render_memo")
+def test_render_pdf_with_export_path(mock_render):
+    runner = CliRunner()
+    result = runner.invoke(
+        cli, ["notes", "--render-pdf", "7", "--export-path", "/tmp/test"]
+    )
+    assert result.exit_code == 0
+    mock_render.assert_called_once_with("/tmp/test", days=7, folder="")
+
+
+@patch("memo.memo.pdf_render_memo")
+def test_render_pdf_with_folder_and_export_path(mock_render):
+    runner = CliRunner()
+    result = runner.invoke(
+        cli, ["notes", "--render-pdf", "14", "--folder", "Work", "--export-path", "/tmp/out"]
+    )
+    assert result.exit_code == 0
+    mock_render.assert_called_once_with("/tmp/out", days=14, folder="Work")

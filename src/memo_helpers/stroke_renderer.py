@@ -129,9 +129,18 @@ def render_strokes_pdf(title, stroke_data, output_path):
         y_start = page_breaks[page_idx]
         y_end = page_breaks[page_idx + 1]
 
+        # Clip drawing to this page's content area
+        content_bottom = MARGIN_BOTTOM
+        c.saveState()
+        clip = c.beginPath()
+        clip.rect(0, content_bottom, page_width, content_top - content_bottom)
+        c.clipPath(clip, stroke=0, fill=0)
+
         # Draw each stroke
         for stroke in strokes:
             _draw_stroke(c, stroke, scale, y_start, content_top, y_start, y_end)
+
+        c.restoreState()
 
     c.save()
     return output_path
